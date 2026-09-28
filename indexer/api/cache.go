@@ -5,40 +5,44 @@ import (
 	"time"
 )
 
-type TTLCache struct {
-	items map[string]cacheItem
-	mu    sync.RWMutex
+type CacheItem struct {
+	Value      interface{}
+	Expiration int64
 }
 
-type cacheItem struct {
-	value      interface{}
-	expiration int64
+type TTLCache struct {
+	items map[string]CacheItem
+	mu    sync.RWMutex
 }
 
 func NewTTLCache() *TTLCache {
 	return &TTLCache{
-		items: make(map[string]cacheItem),
+		items: make(map[string]CacheItem),
 	}
 }
 
 func (c *TTLCache) Set(key string, value interface{}, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.items[key] = cacheItem{
-		value:      value,
-		expiration: time.Now().Add(ttl).UnixNano(),
+	c.items[key] = CacheItem{
+		Value:      value,
+		Expiration: time.Now().Add(ttl).UnixNano(),
 	}
 }
 
 func (c *TTLCache) Get(key string) (interface{}, bool) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	item, found := c.items[key]
+	c.mu.RUnlock()
+
 	if !found {
 		return nil, false
 	}
-	if time.Now().UnixNano() > item.expiration {
+	if time.Now().UnixNano() > item.Expiration {
+		c.mu.Lock()
+		delete(c.items, key)
+		c.mu.Unlock()
 		return nil, false
 	}
-	return item.value, true
+	return item.Value, true
 }
