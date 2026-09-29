@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"trusttrove/indexer/db"
@@ -22,7 +23,20 @@ type WorkerConfig struct {
 	BatchSize    int
 	HTTPTimeout  time.Duration
 	MaxAttempts  int
+	// Concurrency is how many deliveries one batch attempts in parallel. Serial
+	// delivery let a single unresponsive subscriber hold up every other endpoint
+	// in the batch (batch size x HTTP timeout per tick).
+	Concurrency int
+	// LockDuration is how long a claimed delivery row is held exclusively by
+	// this worker. It must exceed HTTPTimeout so an in-flight attempt is never
+	// picked up by a second worker.
+	LockDuration time.Duration
 }
+
+const (
+	defaultConcurrency  = 8
+	defaultLockDuration = 60 * time.Second
+)
 
 // DefaultWorkerConfig returns sensible defaults for the webhook worker.
 func DefaultWorkerConfig() WorkerConfig {
@@ -31,26 +45,59 @@ func DefaultWorkerConfig() WorkerConfig {
 		BatchSize:    50,
 		HTTPTimeout:  10 * time.Second,
 		MaxAttempts:  5,
+		Concurrency:  defaultConcurrency,
+		LockDuration: defaultLockDuration,
 	}
 }
 
 // DeliveryWorker processes webhook deliveries from the database queue.
-// It runs as a background goroutine, polling for pending deliveries and
-// attempting HTTP POST to subscriber URLs with HMAC-SHA256 signatures.
+// It runs as a background goroutine, claiming batches of pending deliveries and
+// attempting HTTP POST to subscriber URLs with HMAC-SHA256 signatures from a
+// bounded pool of workers that share one connection-reusing http.Client.
 type DeliveryWorker struct {
 	cfg WorkerConfig
+	// client is shared by every attempt so TCP/TLS connections are reused
+	// across deliveries instead of paying a fresh handshake per delivery.
+	client *http.Client
+	// attempt is the per-delivery seam. It exists so the bounded fan-out can be
+	// tested without a database; NewDeliveryWorker always wires it to
+	// attemptDelivery.
+	attempt func(context.Context, *db.WebhookDelivery)
 }
 
-// NewDeliveryWorker creates a new webhook delivery worker.
+// NewDeliveryWorker creates a new webhook delivery worker. Zero-valued
+// concurrency and lock settings fall back to the defaults, because a pool of
+// zero workers would claim batches it could never attempt.
 func NewDeliveryWorker(cfg WorkerConfig) *DeliveryWorker {
-	return &DeliveryWorker{
-		cfg: cfg,
+	if cfg.Concurrency <= 0 {
+		cfg.Concurrency = defaultConcurrency
 	}
+	if cfg.LockDuration <= 0 {
+		cfg.LockDuration = defaultLockDuration
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if cfg.HTTPTimeout > 0 {
+		transport.ResponseHeaderTimeout = cfg.HTTPTimeout
+	}
+	w := &DeliveryWorker{
+		cfg: cfg,
+		client: &http.Client{
+			Timeout:   cfg.HTTPTimeout,
+			Transport: transport,
+		},
+	}
+	w.attempt = w.attemptDelivery
+	return w
 }
 
 // Start begins the worker's delivery loop. It blocks until ctx is cancelled.
 func (w *DeliveryWorker) Start(ctx context.Context) error {
-	slog.Info("Starting webhook delivery worker", "poll_interval", w.cfg.PollInterval, "batch_size", w.cfg.BatchSize)
+	slog.Info("Starting webhook delivery worker",
+		"poll_interval", w.cfg.PollInterval,
+		"batch_size", w.cfg.BatchSize,
+		"concurrency", w.cfg.Concurrency,
+		"lock_duration", w.cfg.LockDuration,
+	)
 
 	ticker := time.NewTicker(w.cfg.PollInterval)
 	defer ticker.Stop()
@@ -66,11 +113,14 @@ func (w *DeliveryWorker) Start(ctx context.Context) error {
 	}
 }
 
-// processBatch fetches and processes a batch of pending deliveries.
+// processBatch claims a batch of pending deliveries and attempts them from a
+// bounded worker pool. The batch is awaited before returning so at most one
+// batch is in flight per worker instance even when a tick fires while a slow
+// endpoint is still being tried.
 func (w *DeliveryWorker) processBatch(ctx context.Context) {
-	deliveries, err := db.GetPendingDeliveries(ctx, w.cfg.BatchSize)
+	deliveries, err := db.ClaimPendingDeliveries(ctx, w.cfg.BatchSize, w.cfg.LockDuration)
 	if err != nil {
-		slog.Error("webhook worker: get pending deliveries failed", "error", err)
+		slog.Error("webhook worker: claim pending deliveries failed", "error", err)
 		return
 	}
 
@@ -79,10 +129,29 @@ func (w *DeliveryWorker) processBatch(ctx context.Context) {
 	}
 
 	slog.Debug("webhook worker: processing batch", "count", len(deliveries))
+	w.deliverBatch(ctx, deliveries)
+}
 
+// deliverBatch attempts the claimed deliveries from a bounded worker pool.
+func (w *DeliveryWorker) deliverBatch(ctx context.Context, deliveries []*db.WebhookDelivery) {
+	// A slot per concurrent attempt: the send loop blocks once Concurrency
+	// deliveries are in flight, so no batch can fan out into unbounded
+	// goroutines or DB connections.
+	slots := make(chan struct{}, w.cfg.Concurrency)
+	var wg sync.WaitGroup
 	for _, delivery := range deliveries {
-		w.attemptDelivery(ctx, delivery)
+		if ctx.Err() != nil {
+			break
+		}
+		slots <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
+			w.attempt(ctx, delivery)
+		}()
 	}
+	wg.Wait()
 }
 
 // attemptDelivery performs a single HTTP delivery attempt with signing.
@@ -99,8 +168,7 @@ func (w *DeliveryWorker) attemptDelivery(ctx context.Context, delivery *db.Webho
 	req.Header.Set("X-TrusTrove-Timestamp", ts)
 	req.Header.Set("X-TrusTrove-Signature", "sha256="+sig)
 
-	client := &http.Client{Timeout: w.cfg.HTTPTimeout}
-	resp, err := client.Do(req)
+	resp, err := w.client.Do(req)
 	if err != nil {
 		w.handleFailure(ctx, delivery, nil, fmt.Sprintf("http: %v", err))
 		return

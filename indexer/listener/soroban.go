@@ -92,7 +92,7 @@ type EventListener struct {
 	getCheckpointFn            func(context.Context) (int32, error)
 	getLatestProcessedLedgerFn func(context.Context) (int32, error)
 	upsertCheckpointFn         func(context.Context, int32) error
-	isEventProcessedFn         func(context.Context, string) (bool, error)
+	areEventsProcessedFn       func(context.Context, []string) (map[string]bool, error)
 }
 
 const (
@@ -111,7 +111,7 @@ func NewEventListener(cfg *config.Config, health *api.ListenerHealth, dispatcher
 		getCheckpointFn:            db.GetCheckpoint,
 		getLatestProcessedLedgerFn: db.GetLatestProcessedLedger,
 		upsertCheckpointFn:         db.UpsertCheckpoint,
-		isEventProcessedFn:         db.IsEventProcessed,
+		areEventsProcessedFn:       db.AreEventsProcessed,
 	}
 }
 
@@ -261,7 +261,29 @@ func (l *EventListener) pollEvents(ctx context.Context, startLedger int32) (int3
 		if res.LatestLedger != 0 {
 			latestLedgerSeq = int32(res.LatestLedger)
 		}
+		if len(res.Events) == 0 {
+			break
+		}
+
+		// One de-duplication query per getEvents page instead of one per event.
+		// A failed lookup is fatal for this poll: `processed` would be unknown,
+		// and re-applying already-indexed events is exactly what de-duplication
+		// exists to prevent. Returning the error makes Start back off and retry
+		// the same ledger range instead of double-applying.
+		ids := make([]string, len(res.Events))
+		for i, ev := range res.Events {
+			ids[i] = ev.ID
+		}
+		processed, err := l.areEventsProcessedFn(ctx, ids)
+		if err != nil {
+			return startLedger, fmt.Errorf("check processed events (startLedger=%d, cursor=%s): %w", startLedger, cursor, err)
+		}
+
 		for _, ev := range res.Events {
+			if processed[ev.ID] {
+				continue
+			}
+
 			sorobanEv := SorobanEvent{
 				ID:             ev.ID,
 				ContractID:     ev.ContractID,
@@ -271,20 +293,11 @@ func (l *EventListener) pollEvents(ctx context.Context, startLedger int32) (int3
 				Value:          ev.Value.Xdr,
 			}
 
-			processed, err := l.isEventProcessedFn(ctx, sorobanEv.ID)
-			if err != nil {
-				slog.Error("Failed to check if event is processed", "eventId", sorobanEv.ID, "error", err)
-			}
-			if processed {
-				continue
-			}
-
-			err = l.handleEvent(ctx, sorobanEv)
-			if err != nil {
+			if err := l.handleEvent(ctx, sorobanEv); err != nil {
 				return startLedger, fmt.Errorf("handle event %s: %w", sorobanEv.ID, err)
 			}
 		}
-		if res.Cursor != "" && len(res.Events) > 0 {
+		if res.Cursor != "" {
 			cursor = res.Cursor
 		} else {
 			break
