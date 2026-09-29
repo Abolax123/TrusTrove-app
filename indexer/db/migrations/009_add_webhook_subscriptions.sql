@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS webhook_subscriptions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_address    VARCHAR(56) NOT NULL,
+    user_address    VARCHAR(56) NULL,
     target_url      TEXT NOT NULL,
     event_types     TEXT[] NOT NULL DEFAULT '{}',
     signing_secret  TEXT NOT NULL,

@@ -323,7 +323,7 @@ func NewRouter(h *APIHandler) *chi.Mux {
 		r.Use(AuthMiddleware(h.cfg.JWTSecret))
 		r.Use(RateLimitMiddleware(rl))
 		r.Post("/invoices", h.HandleCreateInvoice)
-		
+
 		// Webhooks
 		r.Post("/webhooks", h.HandleCreateWebhook)
 		r.Get("/webhooks", h.HandleGetWebhooks)
