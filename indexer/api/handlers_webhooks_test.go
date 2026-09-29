@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 func TestHandleCreateWebhook(t *testing.T) {
@@ -20,7 +21,7 @@ func TestHandleCreateWebhook(t *testing.T) {
 	defer func() { createWebhookSub = origCreate }()
 	createWebhookSub = func(ctx context.Context, userAddr, u, secret string, eventTypes []string) (WebhookSubscription, error) {
 		return WebhookSubscription{
-			ID:          1,
+			ID:          uuid.MustParse("00000000-0000-0000-0000-000000000001"),
 			UserAddress: userAddr,
 			URL:         u,
 			Secret:      secret,
@@ -72,7 +73,7 @@ func TestHandleGetWebhooks(t *testing.T) {
 	getWebhookSubs = func(ctx context.Context, userAddr string) ([]WebhookSubscription, error) {
 		return []WebhookSubscription{
 			{
-				ID:          1,
+				ID:          uuid.MustParse("00000000-0000-0000-0000-000000000001"),
 				UserAddress: userAddr,
 				URL:         "https://example.com",
 				EventTypes:  []string{"all"},
@@ -105,8 +106,8 @@ func TestHandleDeleteWebhook(t *testing.T) {
 	// Mock DB function
 	origDel := deleteWebhookSub
 	defer func() { deleteWebhookSub = origDel }()
-	deleteWebhookSub = func(ctx context.Context, id int, userAddr string) (int64, error) {
-		if id == 1 {
+	deleteWebhookSub = func(ctx context.Context, id uuid.UUID, userAddr string) (int64, error) {
+		if id == uuid.MustParse("00000000-0000-0000-0000-000000000001") {
 			return 1, nil
 		}
 		return 0, nil
@@ -118,10 +119,10 @@ func TestHandleDeleteWebhook(t *testing.T) {
 		withAddr   bool
 		wantStatus int
 	}{
-		{"missing address", "1", false, http.StatusUnauthorized},
+		{"missing address", "00000000-0000-0000-0000-000000000001", false, http.StatusUnauthorized},
 		{"invalid id", "abc", true, http.StatusBadRequest},
-		{"not found", "99", true, http.StatusNotFound},
-		{"success", "1", true, http.StatusNoContent},
+		{"not found", "00000000-0000-0000-0000-000000000099", true, http.StatusNotFound},
+		{"success", "00000000-0000-0000-0000-000000000001", true, http.StatusNoContent},
 	}
 
 	for _, tt := range tests {

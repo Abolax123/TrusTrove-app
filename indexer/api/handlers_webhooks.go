@@ -8,15 +8,15 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"trusttrove/indexer/db"
 )
 
 type WebhookSubscription struct {
-	ID          int       `json:"id"`
+	ID          uuid.UUID `json:"id"`
 	UserAddress string    `json:"user_address"`
 	URL         string    `json:"url"`
 	Secret      string    `json:"secret,omitempty"`
@@ -74,16 +74,16 @@ func isSafeURL(urlString string) bool {
 var createWebhookSub = func(ctx context.Context, userAddr, u, secret string, eventTypes []string) (WebhookSubscription, error) {
 	var sub WebhookSubscription
 	err := db.Pool.QueryRow(ctx, `
-		INSERT INTO webhook_subscriptions (user_address, url, secret, event_types)
+		INSERT INTO webhook_subscriptions (user_address, target_url, signing_secret, event_types)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, user_address, url, secret, event_types, created_at
+		RETURNING id, user_address, target_url, signing_secret, event_types, created_at
 	`, userAddr, u, secret, eventTypes).Scan(&sub.ID, &sub.UserAddress, &sub.URL, &sub.Secret, &sub.EventTypes, &sub.CreatedAt)
 	return sub, err
 }
 
 var getWebhookSubs = func(ctx context.Context, userAddr string) ([]WebhookSubscription, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT id, user_address, url, event_types, created_at
+		SELECT id, user_address, target_url, event_types, created_at
 		FROM webhook_subscriptions
 		WHERE user_address = $1
 		ORDER BY created_at DESC
@@ -107,7 +107,7 @@ var getWebhookSubs = func(ctx context.Context, userAddr string) ([]WebhookSubscr
 	return subs, nil
 }
 
-var deleteWebhookSub = func(ctx context.Context, id int, userAddr string) (int64, error) {
+var deleteWebhookSub = func(ctx context.Context, id uuid.UUID, userAddr string) (int64, error) {
 	cmd, err := db.Pool.Exec(ctx, `
 		DELETE FROM webhook_subscriptions
 		WHERE id = $1 AND user_address = $2
@@ -189,7 +189,7 @@ func (h *APIHandler) HandleDeleteWebhook(w http.ResponseWriter, r *http.Request)
 	}
 
 	idStr := chi.URLParam(r, "id")
-	id, err := strconv.Atoi(idStr)
+	id, err := uuid.Parse(idStr)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return

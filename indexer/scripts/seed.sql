@@ -24,3 +24,6 @@ INSERT INTO events_log (event_id, contract_id, ledger, ledger_closed_at, event_t
 VALUES 
 ('evt_001', 'CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', 1000, 1700000000, 'INVOICE_CREATED', '{"invoice_id": "inv_001"}'),
 ('evt_002', 'CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX', 1001, 1700000000, 'INVOICE_CREATED', '{"invoice_id": "inv_002"}');
+
+-- Webhook subscriptions
+INSERT INTO webhook_subscriptions (target_url, signing_secret, event_types) VALUES ('https://example.com', 'secret', '{invoice.created}');
