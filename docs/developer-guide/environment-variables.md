@@ -34,6 +34,8 @@
 
 > **Note:** `AGENT_REGISTRY_CONTRACT` is deployed from Underwrite's separate `underwrite-contract` repo, not from this monorepo.
 
+> **Note:** Provider RPC URLs with embedded API keys are safe to use in `SOROBAN_RPC_URL`. Hosted Soroban RPC providers commonly authenticate via a key in the URL path or query string, and the indexer never echoes that URL to clients: transport errors from `CallSorobanRPC` are unwrapped to the operation name and underlying cause, and API handlers log backend errors server-side while responding with a generic message plus a request id (see issue #921).
+
 ## Source of truth
 
 - **Local dev (backend):** Root `.env.local` (loaded by godotenv)

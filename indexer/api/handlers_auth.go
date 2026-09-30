@@ -26,7 +26,9 @@ func (h *APIHandler) HandleGetAuth(w http.ResponseWriter, r *http.Request) {
 
 	xdrString, err := auth.GenerateChallenge(h.serverKP, address, h.cfg.NetworkPassphrase)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to generate challenge: %s", err.Error()), http.StatusInternalServerError)
+		// The raw error can disclose signing internals; log it and return a
+		// generic message (issue #921).
+		internalError(w, r, "failed to generate challenge", err)
 		return
 	}
 

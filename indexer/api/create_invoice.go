@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -63,19 +64,19 @@ func (h *APIHandler) HandleCreateInvoice(w http.ResponseWriter, r *http.Request)
 
 	params, err := validateCreateInvoiceRequest(r.Context(), body)
 	if err != nil {
-		writeHTTPError(w, err)
+		writeHTTPError(w, r, err)
 		return
 	}
 
 	signedTx, invoiceID, err := h.buildCreateInvoiceTx(r.Context(), params)
 	if err != nil {
-		writeHTTPError(w, err)
+		writeHTTPError(w, r, err)
 		return
 	}
 
 	hash, status, err := h.submitAndConfirm(r.Context(), signedTx)
 	if err != nil {
-		writeHTTPError(w, err)
+		writeHTTPError(w, r, err)
 		return
 	}
 
@@ -200,7 +201,10 @@ func (h *APIHandler) buildCreateInvoiceTx(ctx context.Context, params *createInv
 func (h *APIHandler) fetchServerSequence(ctx context.Context) (int64, error) {
 	var accResp soroban.GetAccountResponse
 	if err := soroban.CallSorobanRPC(ctx, h.cfg.SorobanRPCURL, "getAccount", map[string]string{"address": h.serverKP.Address()}, &accResp); err != nil {
-		return 0, httpErrorf(http.StatusInternalServerError, "failed to fetch server account: %s", err.Error())
+		// err may embed the full RPC URL (and any API key in it); log it and
+		// return a client-safe message instead of interpolating it (issue #921).
+		slog.ErrorContext(ctx, "failed to fetch server account", "error", err)
+		return 0, httpErrorf(http.StatusInternalServerError, "failed to fetch server account")
 	}
 
 	seq, err := strconv.ParseInt(accResp.Sequence, 10, 64)
@@ -241,7 +245,10 @@ func buildCreateInvoiceOp(contractID string, params *createInvoiceParams) (*txnb
 func (h *APIHandler) simulateCreateInvoiceTx(ctx context.Context, txBase64 string) (*soroban.SimulateResponse, string, error) {
 	var simResp soroban.SimulateResponse
 	if err := soroban.CallSorobanRPC(ctx, h.cfg.SorobanRPCURL, "simulateTransaction", map[string]string{"transaction": txBase64}, &simResp); err != nil {
-		return nil, "", httpErrorf(http.StatusInternalServerError, "simulation failed: %s", err.Error())
+		// err may embed the full RPC URL (and any API key in it); log it and
+		// return a client-safe message instead of interpolating it (issue #921).
+		slog.ErrorContext(ctx, "invoice simulation failed", "error", err)
+		return nil, "", httpErrorf(http.StatusInternalServerError, "simulation failed")
 	}
 
 	if len(simResp.Results) == 0 {
@@ -319,7 +326,10 @@ func (h *APIHandler) submitAndConfirm(ctx context.Context, signedTx string) (has
 		Error  string `json:"error"`
 	}
 	if err := soroban.CallSorobanRPC(ctx, h.cfg.SorobanRPCURL, "sendTransaction", map[string]string{"transaction": signedTx}, &submitResp); err != nil {
-		return "", "", httpErrorf(http.StatusInternalServerError, "failed to send transaction: %s", err.Error())
+		// err may embed the full RPC URL (and any API key in it); log it and
+		// return a client-safe message instead of interpolating it (issue #921).
+		slog.ErrorContext(ctx, "failed to send transaction", "error", err)
+		return "", "", httpErrorf(http.StatusInternalServerError, "failed to send transaction")
 	}
 
 	if submitResp.Status == "ERROR" {
@@ -348,7 +358,10 @@ func (h *APIHandler) awaitTransaction(ctx context.Context, hash string) (string,
 
 	for {
 		if err := soroban.CallSorobanRPC(ctx, h.cfg.SorobanRPCURL, "getTransaction", map[string]string{"hash": hash}, &txResult); err != nil {
-			return "", httpErrorf(http.StatusInternalServerError, "failed to poll transaction: %s", err.Error())
+			// err may embed the full RPC URL (and any API key in it); log it and
+			// return a client-safe message instead of interpolating it (issue #921).
+			slog.ErrorContext(ctx, "failed to poll transaction", "error", err)
+			return "", httpErrorf(http.StatusInternalServerError, "failed to poll transaction")
 		}
 
 		if txResult.Status == "SUCCESS" {
