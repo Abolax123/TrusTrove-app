@@ -46,17 +46,50 @@ func (d *Dispatcher) SetHTTPTimeout(timeout time.Duration) {
 
 // Dispatch enqueues a delivery for every active subscription matching eventType.
 // It constructs the full webhook envelope (with schema_version, event_id, etc.)
-// and writes delivery rows to the database. Non-blocking.
+// and writes delivery rows to the database. Non-blocking: failures are logged,
+// not returned. Use EnqueueDeliveries when the delivery rows must be written
+// atomically with an event's state change.
 func (d *Dispatcher) Dispatch(ctx context.Context, eventType string, data map[string]interface{}) {
+	if err := d.EnqueueDeliveries(ctx, db.Pool, eventType, data); err != nil {
+		slog.Error("webhook: enqueue deliveries failed", "event_type", eventType, "error", err)
+	}
+}
+
+// EnqueueDeliveries writes one webhook_deliveries row per active subscription
+// matching eventType, executing every insert through q. Callers pass db.Pool
+// for standalone fan-out, or a pgx.Tx when the rows must commit (or roll back)
+// together with the event's state change and events_log row. It returns the
+// first error instead of swallowing it so a transactional caller can roll back.
+func (d *Dispatcher) EnqueueDeliveries(ctx context.Context, q db.Querier, eventType string, data map[string]interface{}) error {
 	subs, err := db.ListActiveWebhookSubscriptionsForEvent(ctx, eventType)
 	if err != nil {
-		slog.Error("webhook: list subscriptions failed", "event_type", eventType, "error", err)
-		return
+		return fmt.Errorf("webhook: list subscriptions: %w", err)
 	}
 	if len(subs) == 0 {
-		return
+		return nil
 	}
 
+	envelope, err := BuildEnvelope(eventType, data)
+	if err != nil {
+		return fmt.Errorf("webhook: build envelope: %w", err)
+	}
+	envelopeBytes, err := json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("webhook: marshal envelope: %w", err)
+	}
+
+	for _, sub := range subs {
+		if err := db.CreateWebhookDelivery(ctx, q, sub.ID, string(envelope.EventType), envelope.EventID, envelopeBytes); err != nil {
+			return fmt.Errorf("webhook: create delivery for subscription %s: %w", sub.ID, err)
+		}
+	}
+	return nil
+}
+
+// BuildEnvelope converts the listener's internal event name and its dispatch
+// data into the public webhook envelope. Keeping it separate from Dispatch lets
+// the field mapping be tested without a database.
+func BuildEnvelope(eventType string, data map[string]interface{}) (*webhooks.WebhookEnvelope, error) {
 	// Build the envelope data payload
 	eventID := ""
 	if v, ok := data["event_id"].(string); ok {
@@ -85,6 +118,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, eventType string, data map[st
 		}
 	}
 
+	// occurred_at is the ledger close time the listener passed in. Wall-clock
+	// time is only a fallback for events dispatched without a close time, so
+	// historical events re-indexed later keep their original timestamp.
 	occurredAt := time.Now()
 	if v, ok := data["ledger_closed_at"].(int64); ok {
 		occurredAt = time.Unix(v, 0)
@@ -134,8 +170,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, eventType string, data map[st
 			envelope, err = webhooks.NewInvoiceConfirmedPayload(eventID, contractID, ledger, occurredAt, invoiceData)
 		}
 		if err != nil {
-			slog.Error("webhook: build invoice envelope failed", "event_type", eventType, "error", err)
-			return
+			return nil, fmt.Errorf("build invoice envelope: %w", err)
 		}
 	case webhooks.EventPoolDeposit, webhooks.EventPoolWithdrawal, webhooks.EventPoolYieldDistributed:
 		poolData := webhooks.PoolEventData{
@@ -156,12 +191,14 @@ func (d *Dispatcher) Dispatch(ctx context.Context, eventType string, data map[st
 			envelope, err = webhooks.NewPoolYieldDistributedPayload(eventID, contractID, ledger, occurredAt, poolData)
 		}
 		if err != nil {
-			slog.Error("webhook: build pool envelope failed", "event_type", eventType, "error", err)
-			return
+			return nil, fmt.Errorf("build pool envelope: %w", err)
 		}
 	default:
 		// Fallback for unknown event types - use generic payload
-		payloadBytes, _ := json.Marshal(data)
+		payloadBytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("marshal generic payload: %w", err)
+		}
 		envelope = &webhooks.WebhookEnvelope{
 			SchemaVersion: webhooks.SchemaVersion,
 			EventType:     publicEventType,
@@ -173,17 +210,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, eventType string, data map[st
 		}
 	}
 
-	envelopeBytes, err := json.Marshal(envelope)
-	if err != nil {
-		slog.Error("webhook: marshal envelope failed", "event_type", eventType, "error", err)
-		return
-	}
-
-	for _, sub := range subs {
-		if err := db.CreateWebhookDelivery(ctx, sub.ID, string(publicEventType), eventID, envelopeBytes); err != nil {
-			slog.Error("webhook: create delivery failed", "subscription_id", sub.ID, "error", err)
-		}
-	}
+	return envelope, nil
 }
 
 // RunWorker starts the retry loop. It blocks until ctx is cancelled.
@@ -342,6 +369,11 @@ func getInt64(data map[string]interface{}, key string) int64 {
 }
 
 func getInt64Ptr(data map[string]interface{}, key string) *int64 {
+	// The listener passes nullable invoice columns straight from the DB row,
+	// so the pointer case is the common one.
+	if v, ok := data[key].(*int64); ok {
+		return v
+	}
 	if v, ok := data[key].(int64); ok {
 		return &v
 	}
