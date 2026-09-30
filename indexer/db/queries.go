@@ -85,7 +85,12 @@ func GetProtocolStats(ctx context.Context) (*ProtocolStats, error) {
 	return &stats, nil
 }
 
-func InsertInvoice(ctx context.Context, inv *DbInvoice) error {
+// The Insert*/Update* invoice writers and LogEvent below take a Querier so
+// callers can run them against the shared pool (db.Pool) for standalone
+// statements, or against a pgx.Tx when several statements must commit or
+// roll back together (see db.WithTx and the listener's event handling).
+
+func InsertInvoice(ctx context.Context, q Querier, inv *DbInvoice) error {
 	query := `
 		INSERT INTO invoices (
 			id, issuer, buyer, face_value, discount_bps, funded_amount, due_date, status, created_at,
@@ -118,14 +123,14 @@ func InsertInvoice(ctx context.Context, inv *DbInvoice) error {
 		"evidence_hash":        inv.EvidenceHash,
 		"attested_at":          inv.AttestedAt,
 	}
-	_, err := Pool.Exec(ctx, query, args)
+	_, err := q.Exec(ctx, query, args)
 	if err != nil {
 		return fmt.Errorf("queries: insert invoice: %w", err)
 	}
 	return nil
 }
 
-func GetInvoiceByID(ctx context.Context, id string) (*DbInvoice, error) {
+func GetInvoiceByID(ctx context.Context, q Querier, id string) (*DbInvoice, error) {
 	query := `
 		SELECT id, issuer, buyer, face_value, discount_bps, funded_amount, due_date, status, created_at,
 			funded_at, shipped_at, issuer_confirmed, buyer_confirmed, buyer_confirmed_at, repaid_at,
@@ -133,7 +138,7 @@ func GetInvoiceByID(ctx context.Context, id string) (*DbInvoice, error) {
 		FROM invoices WHERE id = $1
 	`
 	var inv DbInvoice
-	err := Pool.QueryRow(ctx, query, id).Scan(
+	err := q.QueryRow(ctx, query, id).Scan(
 		&inv.ID, &inv.Issuer, &inv.Buyer, &inv.FaceValue, &inv.DiscountBps, &inv.FundedAmount,
 		&inv.DueDate, &inv.Status, &inv.CreatedAt, &inv.FundedAt, &inv.ShippedAt,
 		&inv.IssuerConfirmed, &inv.BuyerConfirmed, &inv.BuyerConfirmedAt, &inv.RepaidAt,
@@ -207,91 +212,91 @@ func GetInvoicesPage(ctx context.Context, status, issuer string, limit, offset i
 	return invoices, total, nil
 }
 
-func UpdateInvoiceListed(ctx context.Context, id string, status string, discountBps int) error {
+func UpdateInvoiceListed(ctx context.Context, q Querier, id string, status string, discountBps int) error {
 	query := `
 		UPDATE invoices 
 		SET status = $1, discount_bps = $2
 		WHERE id = $3
 	`
-	_, err := Pool.Exec(ctx, query, status, discountBps, id)
+	_, err := q.Exec(ctx, query, status, discountBps, id)
 	if err != nil {
 		return fmt.Errorf("queries: update invoice listed: %w", err)
 	}
 	return nil
 }
 
-func UpdateInvoiceFunded(ctx context.Context, id string, status string, fundedAmount string, fundedAt int64) error {
+func UpdateInvoiceFunded(ctx context.Context, q Querier, id string, status string, fundedAmount string, fundedAt int64) error {
 	query := `
 		UPDATE invoices 
 		SET status = $1, funded_amount = $2, funded_at = $3
 		WHERE id = $4
 	`
-	_, err := Pool.Exec(ctx, query, status, fundedAmount, fundedAt, id)
+	_, err := q.Exec(ctx, query, status, fundedAmount, fundedAt, id)
 	if err != nil {
 		return fmt.Errorf("queries: update invoice funded: %w", err)
 	}
 	return nil
 }
 
-func UpdateInvoiceShipped(ctx context.Context, id string, status string, shippedAt int64) error {
+func UpdateInvoiceShipped(ctx context.Context, q Querier, id string, status string, shippedAt int64) error {
 	query := `
 		UPDATE invoices 
 		SET status = $1, shipped_at = $2, issuer_confirmed = TRUE
 		WHERE id = $3
 	`
-	_, err := Pool.Exec(ctx, query, status, shippedAt, id)
+	_, err := q.Exec(ctx, query, status, shippedAt, id)
 	if err != nil {
 		return fmt.Errorf("queries: update invoice shipped: %w", err)
 	}
 	return nil
 }
 
-func UpdateInvoiceDeliveryConfirmed(ctx context.Context, id string, status string, buyerConfirmedAt int64) error {
+func UpdateInvoiceDeliveryConfirmed(ctx context.Context, q Querier, id string, status string, buyerConfirmedAt int64) error {
 	query := `
 		UPDATE invoices 
 		SET status = $1, buyer_confirmed = TRUE, buyer_confirmed_at = $2
 		WHERE id = $3
 	`
-	_, err := Pool.Exec(ctx, query, status, buyerConfirmedAt, id)
+	_, err := q.Exec(ctx, query, status, buyerConfirmedAt, id)
 	if err != nil {
 		return fmt.Errorf("queries: update invoice delivery confirmed: %w", err)
 	}
 	return nil
 }
 
-func UpdateInvoiceRepaid(ctx context.Context, id string, status string, repaidAt int64) error {
+func UpdateInvoiceRepaid(ctx context.Context, q Querier, id string, status string, repaidAt int64) error {
 	query := `
 		UPDATE invoices 
 		SET status = $1, repaid_at = $2
 		WHERE id = $3
 	`
-	_, err := Pool.Exec(ctx, query, status, repaidAt, id)
+	_, err := q.Exec(ctx, query, status, repaidAt, id)
 	if err != nil {
 		return fmt.Errorf("queries: update invoice repaid: %w", err)
 	}
 	return nil
 }
 
-func UpdateInvoiceStatus(ctx context.Context, id string, status string) error {
+func UpdateInvoiceStatus(ctx context.Context, q Querier, id string, status string) error {
 	query := `
 		UPDATE invoices 
 		SET status = $1
 		WHERE id = $2
 	`
-	_, err := Pool.Exec(ctx, query, status, id)
+	_, err := q.Exec(ctx, query, status, id)
 	if err != nil {
 		return fmt.Errorf("queries: update invoice status: %w", err)
 	}
 	return nil
 }
 
-func UpdateInvoiceAttestation(ctx context.Context, invoiceID, agentID, evidenceHash string, riskScoreBps int, attestedAt int64) error {
+func UpdateInvoiceAttestation(ctx context.Context, q Querier, invoiceID, agentID, evidenceHash string, riskScoreBps int, attestedAt int64) error {
 	query := `
 		UPDATE invoices 
 		SET attestation_agent_id = $1, risk_score_bps = $2, evidence_hash = $3, attested_at = $4
 		WHERE id = $5
 	`
-	_, err := Pool.Exec(ctx, query, agentID, riskScoreBps, evidenceHash, attestedAt, invoiceID)
+	_, err := q.Exec(ctx, query, agentID, riskScoreBps, evidenceHash, attestedAt, invoiceID)
 	if err != nil {
 		return fmt.Errorf("queries: update invoice attestation: %w", err)
 	}
@@ -349,7 +354,7 @@ func UpdatePoolStats(ctx context.Context, stats *DbPoolStats) error {
 	return nil
 }
 
-func LogEvent(ctx context.Context, eventID, contractID string, ledger int32, ledgerClosedAt int64, eventType string, data interface{}) error {
+func LogEvent(ctx context.Context, q Querier, eventID, contractID string, ledger int32, ledgerClosedAt int64, eventType string, data interface{}) error {
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("queries: log event: marshal data: %w", err)
@@ -360,7 +365,7 @@ func LogEvent(ctx context.Context, eventID, contractID string, ledger int32, led
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (event_id) DO NOTHING
 	`
-	_, err = Pool.Exec(ctx, query, eventID, contractID, ledger, ledgerClosedAt, eventType, dataBytes)
+	_, err = q.Exec(ctx, query, eventID, contractID, ledger, ledgerClosedAt, eventType, dataBytes)
 	if err != nil {
 		return fmt.Errorf("queries: log event: %w", err)
 	}

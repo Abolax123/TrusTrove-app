@@ -45,11 +45,13 @@ func NewAPIHandler(cfg *config.Config) (*APIHandler, error) {
 		return nil, fmt.Errorf("invalid server seed: %w", err)
 	}
 	return &APIHandler{
-		cfg:                cfg,
-		serverKP:           kp,
-		listenerHealth:     NewListenerHealth(),
-		dbHealthChecker:    defaultDBHealthChecker,
-		getInvoiceByIDFn:   db.GetInvoiceByID,
+		cfg:             cfg,
+		serverKP:        kp,
+		listenerHealth:  NewListenerHealth(),
+		dbHealthChecker: defaultDBHealthChecker,
+		getInvoiceByIDFn: func(ctx context.Context, id string) (*db.DbInvoice, error) {
+			return db.GetInvoiceByID(ctx, db.Pool, id)
+		},
 		getPoolStatsFn:     db.GetPoolStats,
 		getRecentEventsFn:  db.GetRecentEvents,
 		getProtocolStatsFn: db.GetProtocolStats,

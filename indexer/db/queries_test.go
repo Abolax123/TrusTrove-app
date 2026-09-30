@@ -47,7 +47,7 @@ func TestInsertAndGetInvoice(t *testing.T) {
 		CreatedAt:    time.Now().Unix(),
 	}
 
-	if err := InsertInvoice(ctx, inv); err != nil {
+	if err := InsertInvoice(ctx, Pool, inv); err != nil {
 		t.Fatalf("InsertInvoice: %v", err)
 	}
 	t.Cleanup(func() {
@@ -56,7 +56,7 @@ func TestInsertAndGetInvoice(t *testing.T) {
 		}
 	})
 
-	got, err := GetInvoiceByID(ctx, id)
+	got, err := GetInvoiceByID(ctx, Pool, id)
 	if err != nil {
 		t.Fatalf("GetInvoiceByID: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestGetInvoiceByID_NotFound(t *testing.T) {
 	skipIfNoDB(t)
 
 	ctx := context.Background()
-	got, err := GetInvoiceByID(ctx, "nonexistent-id-xyz")
+	got, err := GetInvoiceByID(ctx, Pool, "nonexistent-id-xyz")
 	if err != nil {
 		t.Fatalf("GetInvoiceByID not found: unexpected error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestGetInvoicesPage(t *testing.T) {
 			Status:       "Created",
 			CreatedAt:    time.Now().Unix(),
 		}
-		if err := InsertInvoice(ctx, inv); err != nil {
+		if err := InsertInvoice(ctx, Pool, inv); err != nil {
 			t.Fatalf("InsertInvoice %s: %v", id, err)
 		}
 	}
@@ -248,7 +248,7 @@ func TestUpdateInvoiceListed(t *testing.T) {
 
 	ctx := context.Background()
 	id := fmt.Sprintf("listed-test%d", time.Now().UnixNano())
-	if err := InsertInvoice(ctx, newTestInvoice(id)); err != nil {
+	if err := InsertInvoice(ctx, Pool, newTestInvoice(id)); err != nil {
 		t.Fatalf("InsertInvoice: %v", err)
 	}
 	t.Cleanup(func() {
@@ -257,11 +257,11 @@ func TestUpdateInvoiceListed(t *testing.T) {
 		}
 	})
 
-	if err := UpdateInvoiceListed(ctx, id, "Listed", 250); err != nil {
+	if err := UpdateInvoiceListed(ctx, Pool, id, "Listed", 250); err != nil {
 		t.Fatalf("UpdateInvoiceListed: %v", err)
 	}
 
-	got, err := GetInvoiceByID(ctx, id)
+	got, err := GetInvoiceByID(ctx, Pool, id)
 	if err != nil || got == nil {
 		t.Fatalf("GetInvoiceByID: err=%v, got=%v", err, got)
 	}
@@ -278,7 +278,7 @@ func TestUpdateInvoiceFunded(t *testing.T) {
 
 	ctx := context.Background()
 	id := fmt.Sprintf("funded-test%d", time.Now().UnixNano())
-	if err := InsertInvoice(ctx, newTestInvoice(id)); err != nil {
+	if err := InsertInvoice(ctx, Pool, newTestInvoice(id)); err != nil {
 		t.Fatalf("InsertInvoice: %v", err)
 	}
 	t.Cleanup(func() {
@@ -288,11 +288,11 @@ func TestUpdateInvoiceFunded(t *testing.T) {
 	})
 
 	fundedAt := time.Now().Unix()
-	if err := UpdateInvoiceFunded(ctx, id, "Funded", "950000000", fundedAt); err != nil {
+	if err := UpdateInvoiceFunded(ctx, Pool, id, "Funded", "950000000", fundedAt); err != nil {
 		t.Fatalf("UpdateInvoiceFunded: %v", err)
 	}
 
-	got, err := GetInvoiceByID(ctx, id)
+	got, err := GetInvoiceByID(ctx, Pool, id)
 	if err != nil || got == nil {
 		t.Fatalf("GetInvoiceByID: err=%v, got=%v", err, got)
 	}
@@ -312,7 +312,7 @@ func TestUpdateInvoiceShipped(t *testing.T) {
 
 	ctx := context.Background()
 	id := fmt.Sprintf("shipped-test%d", time.Now().UnixNano())
-	if err := InsertInvoice(ctx, newTestInvoice(id)); err != nil {
+	if err := InsertInvoice(ctx, Pool, newTestInvoice(id)); err != nil {
 		t.Fatalf("InsertInvoice: %v", err)
 	}
 	t.Cleanup(func() {
@@ -322,11 +322,11 @@ func TestUpdateInvoiceShipped(t *testing.T) {
 	})
 
 	shippedAt := time.Now().Unix()
-	if err := UpdateInvoiceShipped(ctx, id, "Shipped", shippedAt); err != nil {
+	if err := UpdateInvoiceShipped(ctx, Pool, id, "Shipped", shippedAt); err != nil {
 		t.Fatalf("UpdateInvoiceShipped: %v", err)
 	}
 
-	got, err := GetInvoiceByID(ctx, id)
+	got, err := GetInvoiceByID(ctx, Pool, id)
 	if err != nil || got == nil {
 		t.Fatalf("GetInvoiceByID: err=%v, got=%v", err, got)
 	}
@@ -346,7 +346,7 @@ func TestUpdateInvoiceDeliveryConfirmed(t *testing.T) {
 
 	ctx := context.Background()
 	id := fmt.Sprintf("delivered-test%d", time.Now().UnixNano())
-	if err := InsertInvoice(ctx, newTestInvoice(id)); err != nil {
+	if err := InsertInvoice(ctx, Pool, newTestInvoice(id)); err != nil {
 		t.Fatalf("InsertInvoice: %v", err)
 	}
 	t.Cleanup(func() {
@@ -356,11 +356,11 @@ func TestUpdateInvoiceDeliveryConfirmed(t *testing.T) {
 	})
 
 	confirmedAt := time.Now().Unix()
-	if err := UpdateInvoiceDeliveryConfirmed(ctx, id, "Confirmed", confirmedAt); err != nil {
+	if err := UpdateInvoiceDeliveryConfirmed(ctx, Pool, id, "Confirmed", confirmedAt); err != nil {
 		t.Fatalf("UpdateInvoiceDeliveryConfirmed: %v", err)
 	}
 
-	got, err := GetInvoiceByID(ctx, id)
+	got, err := GetInvoiceByID(ctx, Pool, id)
 	if err != nil || got == nil {
 		t.Fatalf("GetInvoiceByID: err=%v, got=%v", err, got)
 	}
@@ -380,7 +380,7 @@ func TestUpdateInvoiceRepaid(t *testing.T) {
 
 	ctx := context.Background()
 	id := fmt.Sprintf("repaid-test%d", time.Now().UnixNano())
-	if err := InsertInvoice(ctx, newTestInvoice(id)); err != nil {
+	if err := InsertInvoice(ctx, Pool, newTestInvoice(id)); err != nil {
 		t.Fatalf("InsertInvoice: %v", err)
 	}
 	t.Cleanup(func() {
@@ -390,11 +390,11 @@ func TestUpdateInvoiceRepaid(t *testing.T) {
 	})
 
 	repaidAt := time.Now().Unix()
-	if err := UpdateInvoiceRepaid(ctx, id, "Repaid", repaidAt); err != nil {
+	if err := UpdateInvoiceRepaid(ctx, Pool, id, "Repaid", repaidAt); err != nil {
 		t.Fatalf("UpdateInvoiceRepaid: %v", err)
 	}
 
-	got, err := GetInvoiceByID(ctx, id)
+	got, err := GetInvoiceByID(ctx, Pool, id)
 	if err != nil || got == nil {
 		t.Fatalf("GetInvoiceByID: err=%v, got=%v", err, got)
 	}
@@ -411,7 +411,7 @@ func TestUpdateInvoiceStatus(t *testing.T) {
 
 	ctx := context.Background()
 	id := fmt.Sprintf("status-test%d", time.Now().UnixNano())
-	if err := InsertInvoice(ctx, newTestInvoice(id)); err != nil {
+	if err := InsertInvoice(ctx, Pool, newTestInvoice(id)); err != nil {
 		t.Fatalf("InsertInvoice: %v", err)
 	}
 	t.Cleanup(func() {
@@ -420,11 +420,11 @@ func TestUpdateInvoiceStatus(t *testing.T) {
 		}
 	})
 
-	if err := UpdateInvoiceStatus(ctx, id, "Defaulted"); err != nil {
+	if err := UpdateInvoiceStatus(ctx, Pool, id, "Defaulted"); err != nil {
 		t.Fatalf("UpdateInvoiceStatus: %v", err)
 	}
 
-	got, err := GetInvoiceByID(ctx, id)
+	got, err := GetInvoiceByID(ctx, Pool, id)
 	if err != nil || got == nil {
 		t.Fatalf("GetInvoiceByID: err=%v, got=%v", err, got)
 	}
@@ -488,7 +488,7 @@ func TestLogEventAndProcessedLookups(t *testing.T) {
 	ledger := int32(123456)
 	payload := map[string]string{"kind": "test"}
 
-	if err := LogEvent(ctx, eventID, contractID, ledger, time.Now().Unix(), "invoice_listed", payload); err != nil {
+	if err := LogEvent(ctx, Pool, eventID, contractID, ledger, time.Now().Unix(), "invoice_listed", payload); err != nil {
 		t.Fatalf("LogEvent: %v", err)
 	}
 	t.Cleanup(func() {
@@ -498,7 +498,7 @@ func TestLogEventAndProcessedLookups(t *testing.T) {
 	})
 
 	// LogEvent must be idempotent on conflict (ON CONFLICT DO NOTHING).
-	if err := LogEvent(ctx, eventID, contractID, ledger, time.Now().Unix(), "invoice_listed", payload); err != nil {
+	if err := LogEvent(ctx, Pool, eventID, contractID, ledger, time.Now().Unix(), "invoice_listed", payload); err != nil {
 		t.Fatalf("LogEvent (duplicate): %v", err)
 	}
 
@@ -616,7 +616,7 @@ func TestUpdateInvoiceAttestation(t *testing.T) {
 		CreatedAt:    time.Now().Unix(),
 	}
 
-	if err := InsertInvoice(ctx, inv); err != nil {
+	if err := InsertInvoice(ctx, Pool, inv); err != nil {
 		t.Fatalf("InsertInvoice: %v", err)
 	}
 	t.Cleanup(func() {
@@ -626,7 +626,7 @@ func TestUpdateInvoiceAttestation(t *testing.T) {
 	})
 
 	// Attestation fields should start as nil
-	got, err := GetInvoiceByID(ctx, id)
+	got, err := GetInvoiceByID(ctx, Pool, id)
 	if err != nil || got == nil {
 		t.Fatalf("GetInvoiceByID: err=%v, got=%v", err, got)
 	}
@@ -643,13 +643,13 @@ func TestUpdateInvoiceAttestation(t *testing.T) {
 	riskScoreBps := 3500
 	attestedAt := time.Now().Unix()
 
-	err = UpdateInvoiceAttestation(ctx, id, agentID, evidenceHash, riskScoreBps, attestedAt)
+	err = UpdateInvoiceAttestation(ctx, Pool, id, agentID, evidenceHash, riskScoreBps, attestedAt)
 	if err != nil {
 		t.Fatalf("UpdateInvoiceAttestation: %v", err)
 	}
 
 	// Verify attestation fields are populated
-	got, err = GetInvoiceByID(ctx, id)
+	got, err = GetInvoiceByID(ctx, Pool, id)
 	if err != nil || got == nil {
 		t.Fatalf("GetInvoiceByID after attestation: err=%v, got=%v", err, got)
 	}

@@ -12,10 +12,50 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var Pool *pgxpool.Pool
+
+// Querier is the minimal SQL-execution surface shared by *pgxpool.Pool and
+// pgx.Tx. The invoice writers, the event-log helper and the webhook delivery
+// insert accept it so the listener can run every statement for one event
+// against either the shared pool (statement-per-statement, the historical
+// behavior) or a single transaction (the current behavior). QueryRow is
+// included alongside Exec because the listener also reads back the invoice
+// row it just wrote inside the same transaction to build webhook payloads.
+type Querier interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// WithTx runs fn inside a single database transaction on the shared pool.
+// If fn returns an error the transaction is rolled back and that error is
+// returned to the caller; a failed commit is rolled back as well. This is the
+// primitive the event listener uses to commit an event's state change, its
+// events_log row and its webhook_deliveries rows as one unit.
+func WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error {
+	if Pool == nil {
+		return fmt.Errorf("db: WithTx: database pool not initialized")
+	}
+
+	tx, err := Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("db: begin transaction: %w", err)
+	}
+
+	if err := fn(tx); err != nil {
+		rollbackOnError(ctx, tx)
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		rollbackOnError(ctx, tx)
+		return fmt.Errorf("db: commit transaction: %w", err)
+	}
+	return nil
+}
 
 func InitDB(ctx context.Context, databaseURL string) error {
 	var err error
