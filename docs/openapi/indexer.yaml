@@ -263,9 +263,18 @@ paths:
       summary: Historical pool snapshots
       description: Returns historical liquidity pool snapshots used for charts and trend analysis.
       security: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+          description: Maximum number of snapshots to return
       responses:
         "200":
-          description: Pool snapshots
+          description: Pool snapshots ordered by time (newest first)
           content:
             application/json:
               schema:
@@ -528,20 +537,12 @@ components:
     PoolSnapshot:
       type: object
       properties:
-        total_deposits:
-          type: string
-        total_funded:
-          type: string
-        available_liquidity:
-          type: string
-        utilization_rate_bps:
+        timestamp:
           type: integer
-        total_yield_distributed:
-          type: string
-        active_invoice_count:
+          description: Unix timestamp of the snapshot
+        utilizationRateBps:
           type: integer
-        total_shares:
+          description: Pool utilization in basis points
+        totalYieldDistributed:
           type: string
-        updated_at:
-          type: string
-          format: date-time
+          description: Cumulative yield distributed up to this snapshot
