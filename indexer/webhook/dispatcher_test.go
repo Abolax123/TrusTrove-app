@@ -316,6 +316,9 @@ func TestBuildEnvelopeEventIDFallback(t *testing.T) {
 	if first.EventID == "" {
 		t.Fatal("event_id empty when data has no event_id")
 	}
+	// time.Now().UnixNano() can collide on platforms with coarse clock
+	// resolution (notably Windows); yield before the second build.
+	time.Sleep(2 * time.Millisecond)
 	second, err := BuildEnvelope("fund_invoice", data)
 	if err != nil {
 		t.Fatalf("BuildEnvelope: %v", err)
