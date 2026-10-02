@@ -631,12 +631,20 @@ components:
     PoolSnapshot:
       type: object
       properties:
-        timestamp:
-          type: integer
-          description: Unix timestamp of the snapshot
-        utilizationRateBps:
-          type: integer
-          description: Pool utilization in basis points
-        totalYieldDistributed:
+        total_deposits:
           type: string
-          description: Cumulative yield distributed up to this snapshot
+        total_funded:
+          type: string
+        available_liquidity:
+          type: string
+        utilization_rate_bps:
+          type: integer
+        total_yield_distributed:
+          type: string
+        active_invoice_count:
+          type: integer
+        total_shares:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
