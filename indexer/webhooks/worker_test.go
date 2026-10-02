@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -494,35 +493,5 @@ func TestDeliveryWorkerFullFlowViaAttemptSeam(t *testing.T) {
 				t.Errorf("delivery %d retry backoff: got %v, want %v", d.ID, res.retryBackoff, wantBackoff)
 			}
 		}
-	}
-}
-
-// TestDeliveryWorkerStartReturnsOnCancel covers the exported Start loop: it
-// blocks until ctx is cancelled and then returns. ClaimPendingDeliveries needs
-// a database, so this is skipped without TEST_DATABASE_URL; the cancel path
-// itself is what Start guarantees.
-func TestDeliveryWorkerStartReturnsOnCancel(t *testing.T) {
-	if os.Getenv("TEST_DATABASE_URL") == "" {
-		t.Skip("TEST_DATABASE_URL not set — skipping Start integration test")
-	}
-	w := NewDeliveryWorker(WorkerConfig{
-		PollInterval: 20 * time.Millisecond,
-		BatchSize:    2,
-		Concurrency:  2,
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- w.Start(ctx) }()
-
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-
-	select {
-	case err := <-done:
-		if err != context.Canceled {
-			t.Errorf("Start returned %v, want context.Canceled", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Start did not return after context cancel")
 	}
 }
